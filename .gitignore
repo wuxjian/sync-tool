@@ -1,0 +1,22 @@
+*.exe
+*.log
+*.err
+*.out
+*.test
+*.meta
+*.yaml
+!*.yaml.example
+
+/go.sum
+
+# IDE
+.vs/
+.idea/
+.vscode/
+
+# OS
+Thumbs.db
+.DS_Store
+
+# test data
+test/

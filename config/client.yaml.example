@@ -1,0 +1,18 @@
+# 客户端配置（部署在 Windows 上）
+# 启动: client.exe -config=config.yaml
+# 然后浏览器打开 http://localhost:9090
+
+# 本地 HTTP 监听地址（提供 HTML 页面 + 同步控制）
+listen: ":9090"
+
+# 远程服务端配置
+remote:
+  url: "http://192.168.1.10:8080"
+  token: "your-strong-secret-token-here"
+
+# 本地配置
+local:
+  # 同步到本地的根目录
+  root: "D:\\synced"
+  # 元信息文件（保存每个文件的 size/mtime/sha256）
+  meta_file: "meta.json"

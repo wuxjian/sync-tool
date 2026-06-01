@@ -1,0 +1,28 @@
+# 服务端配置（部署在 Linux 上）
+# 启动: ./server -config=config.yaml
+
+# HTTP 监听地址
+listen: ":8080"
+
+# 访问令牌（留空表示不鉴权）
+token: "your-strong-secret-token-here"
+
+# 要同步的根目录（绝对路径）
+root: "/data/files"
+
+# 文件过滤规则
+filter:
+  # 排除这些后缀（小写，含点）
+  exclude_ext:
+    - ".tmp"
+    - ".swp"
+    - ".bak"
+    - ".log"
+
+  # 排除匹配这些正则的相对路径
+  exclude_pattern:
+    - "^\\."           # 隐藏文件
+    - "/\\.git/"       # git 目录
+
+  # 文件大小上限（字节），0 表示不限
+  max_size: 0

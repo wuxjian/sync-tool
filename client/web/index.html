@@ -1,0 +1,548 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>文件同步客户端</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      font-family: -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+      margin: 0; padding: 0; background: #f5f7fa; color: #2c3e50;
+    }
+    .header {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: #fff; padding: 16px 24px;
+      display: flex; align-items: center; justify-content: space-between;
+      box-shadow: 0 2px 8px rgba(0,0,0,.1);
+    }
+    .header h1 { margin: 0; font-size: 18px; font-weight: 600; }
+    .header .config { font-size: 12px; opacity: .85; }
+    .container { max-width: 1400px; margin: 0 auto; padding: 16px; }
+    .toolbar {
+      background: #fff; padding: 12px 16px; border-radius: 8px;
+      box-shadow: 0 1px 3px rgba(0,0,0,.05); margin-bottom: 12px;
+      display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
+    }
+    button {
+      padding: 8px 16px; border: 1px solid #d0d7de; background: #fff;
+      border-radius: 6px; cursor: pointer; font-size: 14px;
+      transition: all .15s;
+    }
+    button:hover { background: #f6f8fa; }
+    button.primary { background: #2da44e; color: #fff; border-color: #2c974b; }
+    button.primary:hover { background: #2c974b; }
+    button.primary:disabled { background: #94d3a2; border-color: #94d3a2; cursor: not-allowed; }
+    .info { color: #57606a; font-size: 13px; }
+    .layout { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    @media (max-width: 900px) { .layout { grid-template-columns: 1fr; } }
+    .panel {
+      background: #fff; border-radius: 8px;
+      box-shadow: 0 1px 3px rgba(0,0,0,.05);
+      overflow: hidden; display: flex; flex-direction: column;
+    }
+    .panel-header {
+      padding: 10px 16px; border-bottom: 1px solid #eaeef2;
+      font-weight: 600; font-size: 14px; display: flex;
+      align-items: center; justify-content: space-between;
+    }
+    .panel-body { padding: 12px 16px; flex: 1; overflow: auto; max-height: 60vh; }
+    .tree { font-size: 14px; line-height: 1.8; }
+    .tree-row { display: flex; align-items: center; gap: 4px; padding: 2px 0; }
+    .tree-row:hover { background: #f6f8fa; }
+    .toggle { width: 16px; display: inline-block; text-align: center; cursor: pointer; user-select: none; color: #57606a; }
+    .icon { width: 18px; text-align: center; }
+    .name { flex: 1; cursor: pointer; }
+    .size { color: #8c959f; font-size: 12px; margin-left: 4px; }
+    .progress {
+      height: 8px; background: #eaeef2; border-radius: 4px; overflow: hidden;
+      margin: 8px 0;
+    }
+    .progress-bar {
+      height: 100%; background: linear-gradient(90deg, #2da44e, #3fb950);
+      width: 0; transition: width .2s;
+    }
+    .events { font-family: ui-monospace, "Consolas", monospace; font-size: 12px; }
+    .event { padding: 3px 0; border-bottom: 1px solid #f0f3f6; }
+    .event .type { display: inline-block; min-width: 64px; font-weight: 600; }
+    .type-skip { color: #57606a; }
+    .type-download { color: #0969da; }
+    .type-progress { color: #6e40c9; }
+    .type-verify { color: #2da44e; }
+    .type-error { color: #cf222e; }
+    .type-done { color: #1a7f37; font-weight: 700; }
+    .badge {
+      display: inline-block; padding: 1px 7px; border-radius: 10px;
+      font-size: 11px; font-weight: 600; line-height: 1.5;
+      vertical-align: middle;
+    }
+    .badge-new {
+      background: #ffebe9; color: #cf222e; border: 1px solid #ffcecb;
+    }
+    .badge-modified {
+      background: #fff1e5; color: #bc4c00; border: 1px solid #ffd1b3;
+    }
+    .badge-same {
+      background: #dafbe1; color: #1a7f37; border: 1px solid #aceebb;
+    }
+    .badge-dir {
+      background: #ddf4ff; color: #0969da; border: 1px solid #b6e3ff;
+    }
+    .badge-missing {
+      background: #fff8c5; color: #9a6700; border: 1px solid #f2dc91;
+    }
+    .badge.idle { background: #eaeef2; color: #57606a; }
+    .badge.running { background: #ddf4ff; color: #0969da; }
+    .badge.error { background: #ffebe9; color: #cf222e; }
+    .summary {
+      display: inline-flex; gap: 8px; margin-left: 8px; font-size: 12px;
+    }
+    .summary .item { display: inline-flex; align-items: center; gap: 4px; }
+    .summary .dot { width: 8px; height: 8px; border-radius: 50%; }
+    .dot-new { background: #cf222e; }
+    .dot-modified { background: #bc4c00; }
+    .dot-same { background: #1a7f37; }
+    .dot-missing { background: #9a6700; }
+    .local-file-row { color: #57606a; }
+    .local-file-row.missing { color: #9a6700; text-decoration: line-through; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>📁 文件同步客户端</h1>
+    <div class="config" id="configInfo">加载中...</div>
+  </div>
+  <div class="container">
+    <div class="toolbar">
+      <button onclick="loadAll()">🔄 刷新</button>
+      <button onclick="selectAllNeed()">✓ 仅选需同步</button>
+      <button onclick="selectAll()">全选</button>
+      <button onclick="selectNone()">全不选</button>
+      <button onclick="selectInvert()">反选</button>
+      <button class="primary" id="syncBtn" onclick="startSync()">▶ 开始同步</button>
+      <span class="info" id="statusInfo"></span>
+    </div>
+
+    <div class="layout">
+      <div class="panel">
+        <div class="panel-header">
+          <span>☁️ 远程文件树 <span class="summary" id="remoteSummary"></span></span>
+          <span class="info" id="remoteStat"></span>
+        </div>
+        <div class="panel-body">
+          <div class="tree" id="tree">加载中...</div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-header">
+          <span>💾 本地文件树（来自元信息）</span>
+          <span class="info" id="localStat"></span>
+        </div>
+        <div class="panel-body">
+          <div class="tree" id="localTree">加载中...</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel" style="margin-top: 12px;">
+      <div class="panel-header">
+        <span>📊 同步状态</span>
+        <span id="statusBadge" class="badge idle">空闲</span>
+      </div>
+      <div class="panel-body" style="max-height: 30vh;">
+        <div class="info" id="statusSummary">尚未开始同步</div>
+        <div class="progress"><div class="progress-bar" id="progressBar"></div></div>
+        <div class="events" id="events"></div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // ===== 远端树 =====
+    let treeData = [];            // FileStatus[]
+    let allDirs = new Map();       // rel_path -> {expanded, children: [rel_path]}
+    let allFiles = new Set();      // rel_path
+    let fileStatus = new Map();    // rel_path -> status string
+    let selected = new Set();      // rel_path
+
+    // ===== 本地树 =====
+    let localData = [];           // LocalFile[]
+    let localDirs = new Map();     // rel_path -> {expanded, children}
+    let localFiles = new Set();
+    let localSelected = new Set(); // 暂未使用（本地树只读）
+
+    let statusTimer = null;
+
+    async function fetchJSON(url) {
+      const r = await fetch(url);
+      if (!r.ok) throw new Error(url + ' -> ' + r.status);
+      return r.json();
+    }
+
+    function fmtSize(n) {
+      if (!n || n === 0) return '0 B';
+      const u = ['B','KB','MB','GB','TB'];
+      let i = 0;
+      while (n >= 1024 && i < u.length-1) { n /= 1024; i++; }
+      return n.toFixed(i ? 1 : 0) + ' ' + u[i];
+    }
+
+    async function loadConfig() {
+      try {
+        const c = await fetchJSON('/api/config');
+        document.getElementById('configInfo').textContent =
+          `远程: ${c.remote_url}  ·  本地: ${c.local_root}`;
+      } catch (e) {
+        document.getElementById('configInfo').textContent = '配置加载失败';
+      }
+    }
+
+    // ----- 远端树 -----
+    async function loadRemoteTree() {
+      const root = document.getElementById('tree');
+      root.innerHTML = '加载中...';
+      try {
+        const data = await fetchJSON('/api/diff?path=&depth=0');
+        treeData = data.items;
+        allDirs.clear();
+        allFiles.clear();
+        fileStatus.clear();
+        // 始终创建根目录条目
+        allDirs.set('', { expanded: true, children: [] });
+        for (const n of treeData) {
+          fileStatus.set(n.rel_path, n.status);
+          if (n.status === 'dir') {
+            allDirs.set(n.rel_path, { expanded: false, children: [] });
+          } else {
+            allFiles.add(n.rel_path);
+          }
+        }
+        buildChildren();
+        renderTree();
+        updateRemoteSummary();
+      } catch (e) {
+        root.innerHTML = '加载失败: ' + e.message;
+      }
+    }
+
+    function buildChildren() {
+      for (const d of allDirs.keys()) {
+        allDirs.get(d).children = [];
+      }
+      for (const n of treeData) {
+        if (n.is_dir) continue;
+        const p = parentOf(n.rel_path);
+        if (allDirs.has(p)) {
+          allDirs.get(p).children.push(n.rel_path);
+        } else {
+          // 父目录缺失，挂到根
+          allDirs.get('').children.push(n.rel_path);
+        }
+      }
+    }
+
+    function parentOf(p) {
+      if (!p) return '';
+      const i = p.lastIndexOf('/');
+      return i < 0 ? '' : p.slice(0, i);
+    }
+
+    function renderTree() {
+      const root = document.getElementById('tree');
+      const html = [];
+      renderNode('', html, 0);
+      root.innerHTML = html.join('');
+    }
+
+    function renderNode(rel, html, depth) {
+      const meta = allDirs.get(rel);
+      if (!meta) return;
+      const name = rel === '' ? '根目录' : rel.split('/').pop();
+      const fileCount = meta.children.length;
+      const hasChildren = fileCount > 0;
+      html.push(`<div class="tree-row" style="padding-left:${depth*16 + 4}px">`);
+      if (hasChildren) {
+        html.push(`<span class="toggle" onclick="toggleDir('${escapeAttr(rel)}')">${meta.expanded ? '▼' : '▶'}</span>`);
+      } else {
+        html.push(`<span class="toggle"></span>`);
+      }
+      html.push(`<span class="icon">📁</span>`);
+      html.push(`<span class="name" onclick="toggleDir('${escapeAttr(rel)}')"><b>${escapeHTML(name)}</b> <span class="size">(${fileCount} 项)</span></span>`);
+      html.push(`</div>`);
+
+      if (!meta.expanded) return;
+
+      // 子文件
+      for (const fp of meta.children) {
+        const fname = fp.split('/').pop();
+        const st = fileStatus.get(fp) || 'same';
+        const fi = treeData.find(x => x.rel_path === fp);
+        const fc = selected.has(fp) ? 'checked' : '';
+        const badge = statusBadge(st);
+        html.push(`<div class="tree-row" style="padding-left:${(depth+1)*16 + 4}px">`);
+        html.push(`<span class="toggle"></span>`);
+        html.push(`<span class="icon">${st === 'same' ? '📄' : '📝'}</span>`);
+        html.push(`<input type="checkbox" ${fc} onclick="onFileCheck(this, '${escapeAttr(fp)}')">`);
+        html.push(`<span class="name">${escapeHTML(fname)}</span>`);
+        if (fi) {
+          html.push(`<span class="size">${fmtSize(fi.size)}</span>`);
+        }
+        html.push(badge);
+        html.push(`</div>`);
+      }
+    }
+
+    function statusBadge(st) {
+      const map = { new: '新增', modified: '已改', same: '一致', dir: '目录' };
+      const label = map[st] || st;
+      return `<span class="badge badge-${st}">${label}</span>`;
+    }
+
+    function toggleDir(rel) {
+      const m = allDirs.get(rel);
+      if (!m) return;
+      m.expanded = !m.expanded;
+      renderTree();
+    }
+
+    function onFileCheck(cb, fp) {
+      if (cb.checked) selected.add(fp);
+      else selected.delete(fp);
+    }
+
+    function updateRemoteSummary() {
+      let n = 0, m = 0, s = 0;
+      for (const f of allFiles) {
+        const st = fileStatus.get(f);
+        if (st === 'new') n++;
+        else if (st === 'modified') m++;
+        else if (st === 'same') s++;
+      }
+      const el = document.getElementById('remoteSummary');
+      el.innerHTML =
+        `<span class="item"><span class="dot dot-new"></span>新增 ${n}</span>` +
+        `<span class="item"><span class="dot dot-modified"></span>已改 ${m}</span>` +
+        `<span class="item"><span class="dot dot-same"></span>一致 ${s}</span>`;
+      document.getElementById('remoteStat').textContent = `共 ${allFiles.size} 个文件`;
+    }
+
+    // ----- 本地树 -----
+    async function loadLocalTree() {
+      const root = document.getElementById('localTree');
+      root.innerHTML = '加载中...';
+      try {
+        const data = await fetchJSON('/api/local/tree');
+        localData = data.items;
+        localDirs.clear();
+        localFiles.clear();
+        localDirs.set('', { expanded: true, children: [] });
+        for (const f of localData) {
+          localFiles.add(f.rel_path);
+          const p = parentOf(f.rel_path);
+          if (!localDirs.has(p)) localDirs.set(p, { expanded: false, children: [] });
+        }
+        for (const f of localData) {
+          const p = parentOf(f.rel_path);
+          localDirs.get(p).children.push(f.rel_path);
+        }
+        renderLocalTree();
+        updateLocalSummary();
+      } catch (e) {
+        root.innerHTML = '加载失败: ' + e.message;
+      }
+    }
+
+    function renderLocalTree() {
+      const root = document.getElementById('localTree');
+      const html = [];
+      renderLocalNode('', html, 0);
+      root.innerHTML = html.join('');
+    }
+
+    function renderLocalNode(rel, html, depth) {
+      const meta = localDirs.get(rel);
+      if (!meta) return;
+      const name = rel === '' ? '本地根目录' : rel.split('/').pop();
+      const fileCount = meta.children.length;
+      const hasChildren = fileCount > 0;
+      html.push(`<div class="tree-row" style="padding-left:${depth*16 + 4}px">`);
+      if (hasChildren) {
+        html.push(`<span class="toggle" onclick="toggleLocalDir('${escapeAttr(rel)}')">${meta.expanded ? '▼' : '▶'}</span>`);
+      } else {
+        html.push(`<span class="toggle"></span>`);
+      }
+      html.push(`<span class="icon">📁</span>`);
+      html.push(`<span class="name" onclick="toggleLocalDir('${escapeAttr(rel)}')"><b>${escapeHTML(name)}</b> <span class="size">(${fileCount} 项)</span></span>`);
+      html.push(`</div>`);
+
+      if (!meta.expanded) return;
+
+      for (const fp of meta.children) {
+        const f = localData.find(x => x.rel_path === fp);
+        if (!f) continue;
+        const fname = fp.split('/').pop();
+        const cls = f.exists ? 'local-file-row' : 'local-file-row missing';
+        const badge = f.exists
+          ? `<span class="badge badge-same">本地</span>`
+          : `<span class="badge badge-missing">已缺失</span>`;
+        html.push(`<div class="tree-row ${cls}" style="padding-left:${(depth+1)*16 + 4}px">`);
+        html.push(`<span class="toggle"></span>`);
+        html.push(`<span class="icon">📄</span>`);
+        html.push(`<span style="width:14px"></span>`);
+        html.push(`<span class="name">${escapeHTML(fname)}</span>`);
+        html.push(`<span class="size">${fmtSize(f.size)}</span>`);
+        html.push(badge);
+        html.push(`</div>`);
+      }
+    }
+
+    function toggleLocalDir(rel) {
+      const m = localDirs.get(rel);
+      if (!m) return;
+      m.expanded = !m.expanded;
+      renderLocalTree();
+    }
+
+    function updateLocalSummary() {
+      let total = 0, missing = 0;
+      for (const f of localData) {
+        total++;
+        if (!f.exists) missing++;
+      }
+      document.getElementById('localStat').textContent =
+        `${total} 个文件${missing ? ` · 缺失 ${missing}` : ''}`;
+    }
+
+    // ----- 操作 -----
+    function selectAllNeed() {
+      // 只勾选状态为 new 或 modified 的文件
+      selected.clear();
+      for (const f of allFiles) {
+        const st = fileStatus.get(f);
+        if (st === 'new' || st === 'modified') selected.add(f);
+      }
+      renderTree();
+    }
+    function selectAll() {
+      for (const f of allFiles) selected.add(f);
+      renderTree();
+    }
+    function selectNone() {
+      selected.clear();
+      renderTree();
+    }
+    function selectInvert() {
+      for (const f of allFiles) {
+        if (selected.has(f)) selected.delete(f);
+        else selected.add(f);
+      }
+      renderTree();
+    }
+
+    function loadAll() {
+      loadRemoteTree();
+      loadLocalTree();
+    }
+
+    async function startSync() {
+      const paths = [...selected];
+      if (paths.length === 0) {
+        alert('请先勾选要同步的文件');
+        return;
+      }
+      const btn = document.getElementById('syncBtn');
+      btn.disabled = true;
+      btn.textContent = '同步中...';
+      document.getElementById('events').innerHTML = '';
+      try {
+        const r = await fetch('/api/sync', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({paths})
+        });
+        const data = await r.json();
+        if (!r.ok) throw new Error(data.error || '启动失败');
+        startPolling();
+      } catch (e) {
+        alert('启动失败: ' + e.message);
+        btn.disabled = false;
+        btn.textContent = '▶ 开始同步';
+      }
+    }
+
+    function startPolling() {
+      if (statusTimer) clearInterval(statusTimer);
+      statusTimer = setInterval(pollStatus, 800);
+      pollStatus();
+    }
+
+    async function pollStatus() {
+      try {
+        const s = await fetchJSON('/api/status');
+        renderStatus(s);
+        if (!s.running) {
+          clearInterval(statusTimer);
+          statusTimer = null;
+          document.getElementById('syncBtn').disabled = false;
+          document.getElementById('syncBtn').textContent = '▶ 开始同步';
+          // 同步结束后自动刷新两边树
+          loadAll();
+        }
+      } catch (e) { /* ignore */ }
+    }
+
+    function renderStatus(s) {
+      const badge = document.getElementById('statusBadge');
+      if (s.running) {
+        badge.className = 'badge running';
+        badge.textContent = '运行中';
+      } else if (s.failed > 0) {
+        badge.className = 'badge error';
+        badge.textContent = '部分失败';
+      } else {
+        badge.className = 'badge idle';
+        badge.textContent = '空闲';
+      }
+      const total = s.total || 0;
+      const done = s.completed || 0;
+      const pct = total > 0 ? Math.min(100, (done / total * 100)) : 0;
+      document.getElementById('progressBar').style.width = pct + '%';
+      document.getElementById('statusSummary').textContent =
+        `总 ${total}  ·  已完成 ${done}  ·  跳过 ${s.skipped}  ·  失败 ${s.failed}`;
+
+      const ev = document.getElementById('events');
+      const rendered = ev.childElementCount;
+      const list = s.events || [];
+      if (list.length < rendered) ev.innerHTML = '';
+      for (let i = rendered; i < list.length; i++) {
+        const e = list[i];
+        const div = document.createElement('div');
+        div.className = 'event';
+        const cn = 'type-' + e.type;
+        let msg = e.rel_path ? ` ${e.rel_path}` : '';
+        if (e.type === 'progress') {
+          msg += ` (${fmtSize(e.current)}/${fmtSize(e.total)})`;
+        } else if (e.message) {
+          msg += ` - ${e.message}`;
+        }
+        div.innerHTML = `<span class="type ${cn}">[${e.type}]</span>${escapeHTML(msg)}`;
+        ev.appendChild(div);
+      }
+      ev.scrollTop = ev.scrollHeight;
+    }
+
+    function escapeHTML(s) {
+      return String(s).replace(/[&<>"']/g, c => ({
+        '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+      })[c]);
+    }
+    function escapeAttr(s) {
+      return String(s).replace(/'/g, "\\'").replace(/"/g, '&quot;');
+    }
+
+    // 启动
+    loadConfig();
+    loadAll();
+  </script>
+</body>
+</html>
