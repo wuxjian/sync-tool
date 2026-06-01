@@ -2,11 +2,15 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 )
@@ -15,7 +19,11 @@ func main() {
 	cfgPath := flag.String("config", "config.yaml", "配置文件路径")
 	flag.Parse()
 
-	cfg, err := LoadConfig(*cfgPath)
+	cfgFile, err := resolveConfig(*cfgPath)
+	if err != nil {
+		log.Fatalf("加载配置失败: %v", err)
+	}
+	cfg, err := LoadConfig(cfgFile)
 	if err != nil {
 		log.Fatalf("加载配置失败: %v", err)
 	}
@@ -71,6 +79,51 @@ func main() {
 	}
 	<-idleConnClosed
 	log.Printf("已退出")
+}
+
+// resolveConfig 查找配置文件，按优先级搜索多个位置。
+// 如果 name 没有扩展名，会自动尝试 .yaml 和 .yml。
+func resolveConfig(name string) (string, error) {
+	bases := []string{name}
+	if filepath.Ext(name) == "" {
+		bases = append(bases, name+".yaml", name+".yml")
+	}
+
+	var dirs []string
+	seen := map[string]bool{}
+	addDir := func(dir string) {
+		abs, err := filepath.Abs(dir)
+		if err == nil && !seen[abs] {
+			dirs = append(dirs, dir)
+			seen[abs] = true
+		}
+	}
+	addDir(".")
+	if exec, err := os.Executable(); err == nil {
+		execDir := filepath.Dir(exec)
+		addDir(execDir)
+		addDir(filepath.Join(execDir, "config"))
+	}
+	addDir("config")
+
+	var tried []string
+	for _, base := range bases {
+		for _, dir := range dirs {
+			candidate := filepath.Join(dir, base)
+			tried = append(tried, candidate)
+			if _, err := os.Stat(candidate); err == nil {
+				return candidate, nil
+			}
+		}
+	}
+
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "未找到配置文件 %q，已尝试以下路径:\n", name)
+	for _, p := range tried {
+		abs, _ := filepath.Abs(p)
+		fmt.Fprintf(&sb, "  - %s\n", abs)
+	}
+	return "", errors.New(strings.TrimSuffix(sb.String(), "\n"))
 }
 
 func ping(c *RemoteClient) error {

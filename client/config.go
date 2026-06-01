@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 
@@ -31,7 +32,7 @@ type LocalConfig struct {
 func LoadConfig(path string) (*Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("读取配置文件 %s 失败: %w", path, err)
 	}
 	cfg := &Config{
 		Listen: ":9090",

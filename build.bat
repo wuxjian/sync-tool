@@ -31,6 +31,17 @@ if %errorlevel% NEQ 0 (
 )
 echo   -^> out\synctool-client.exe
 
+if exist "%~dp0client.yaml" (
+    copy "%~dp0client.yaml" "%~dp0out\client.yaml" >nul
+) else (
+    copy "%~dp0config\client.yaml.example" "%~dp0out\client.yaml" >nul
+)
+if exist "%~dp0server\config.yaml" (
+    copy "%~dp0server\config.yaml" "%~dp0out\server.yaml" >nul
+) else (
+    copy "%~dp0config\server.yaml.example" "%~dp0out\server.yaml" >nul
+)
+
 echo.
 echo ==============================
 echo Build complete!

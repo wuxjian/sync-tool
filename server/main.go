@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 )
@@ -15,7 +16,8 @@ func main() {
 	cfgPath := flag.String("config", "config.yaml", "配置文件路径")
 	flag.Parse()
 
-	cfg, err := LoadConfig(*cfgPath)
+	cfgFile := resolveServerConfig(*cfgPath)
+	cfg, err := LoadConfig(cfgFile)
 	if err != nil {
 		log.Fatalf("加载配置失败: %v", err)
 	}
@@ -66,6 +68,21 @@ func absPath(p string) (string, error) {
 		p = "."
 	}
 	return absResolve(p)
+}
+
+func resolveServerConfig(name string) string {
+	if _, err := os.Stat(name); err == nil {
+		return name
+	}
+	exec, err := os.Executable()
+	if err != nil {
+		return name
+	}
+	alt := filepath.Join(filepath.Dir(exec), name)
+	if _, err := os.Stat(alt); err == nil {
+		return alt
+	}
+	return name
 }
 
 func maskToken(t string) string {
