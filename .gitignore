@@ -20,3 +20,6 @@ Thumbs.db
 
 # test data
 test/
+
+# build output
+out/

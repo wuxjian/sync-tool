@@ -61,6 +61,8 @@ cd server
 go build -o synctool-server.exe .
 ```
 
+Windows 下也可直接运行 `build.bat` 一键编译两者。
+
 ### 2. 在 Linux 上启动服务端
 
 ```bash
@@ -76,6 +78,8 @@ cp ../config/server.yaml.example config.yaml
   根目录  : /data/files
   Token   : yo****re
 ```
+
+> 默认前台运行，终端退出进程即停。后台运行方式：`nohup ./synctool-server -config=config.yaml &` 或配置为 systemd 服务。
 
 ### 3. 在 Windows 上启动客户端
 
