@@ -271,8 +271,12 @@
 
       if (!meta.expanded) return;
 
-      // 子文件
+      // 子节点（目录递归渲染，文件渲染为可勾选行）
       for (const fp of meta.children) {
+        if (allDirs.has(fp)) {
+          renderNode(fp, html, depth + 1);
+          continue;
+        }
         const fname = fp.split('/').pop();
         const st = fileStatus.get(fp) || 'same';
         const fi = treeData.find(x => x.rel_path === fp);
