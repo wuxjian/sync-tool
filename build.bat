@@ -31,15 +31,23 @@ if %errorlevel% NEQ 0 (
 )
 echo   -^> out\synctool-client.exe
 
-if exist "%~dp0client.yaml" (
-    copy "%~dp0client.yaml" "%~dp0out\client.yaml" >nul
+if not exist "%~dp0out\client.yaml" (
+    if exist "%~dp0client.yaml" (
+        copy "%~dp0client.yaml" "%~dp0out\client.yaml" >nul
+    ) else (
+        copy "%~dp0config\client.yaml.example" "%~dp0out\client.yaml" >nul
+    )
 ) else (
-    copy "%~dp0config\client.yaml.example" "%~dp0out\client.yaml" >nul
+    echo   - out\client.yaml 已存在，跳过复制
 )
-if exist "%~dp0server\config.yaml" (
-    copy "%~dp0server\config.yaml" "%~dp0out\server.yaml" >nul
+if not exist "%~dp0out\server.yaml" (
+    if exist "%~dp0server\config.yaml" (
+        copy "%~dp0server\config.yaml" "%~dp0out\server.yaml" >nul
+    ) else (
+        copy "%~dp0config\server.yaml.example" "%~dp0out\server.yaml" >nul
+    )
 ) else (
-    copy "%~dp0config\server.yaml.example" "%~dp0out\server.yaml" >nul
+    echo   - out\server.yaml 已存在，跳过复制
 )
 
 echo.

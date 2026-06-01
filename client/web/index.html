@@ -230,7 +230,6 @@
         allDirs.get(d).children = [];
       }
       for (const n of treeData) {
-        if (n.is_dir) continue;
         const p = parentOf(n.rel_path);
         if (allDirs.has(p)) {
           allDirs.get(p).children.push(n.rel_path);
