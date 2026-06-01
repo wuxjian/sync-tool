@@ -4,13 +4,13 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"sort"
 	"sync"
-	"sync/atomic"
 	"time"
 )
 
@@ -85,7 +85,7 @@ func (s *Syncer) GetStatus() map[string]any {
 		"skipped":    s.status.skipped,
 		"failed":     s.status.failed,
 		"started_at": s.status.startedAt,
-		"events":     s.status.events,
+		"events":     append([]SyncEvent(nil), s.status.events...),
 	}
 }
 
@@ -189,7 +189,7 @@ func (s *Syncer) IsRunning() bool {
 // paths 是要同步的相对路径列表（可能是目录或文件）
 func (s *Syncer) Sync(ctx context.Context, paths []string) error {
 	if s.IsRunning() {
-		return fmt.Errorf("已有同步任务在运行中")
+		return errors.New("已有同步任务在运行中")
 	}
 	s.status.mu.Lock()
 	s.status.running = true
@@ -231,7 +231,9 @@ func (s *Syncer) Sync(ctx context.Context, paths []string) error {
 			default:
 			}
 			if err := s.syncOne(ctx, f); err != nil {
-				atomic.AddInt64(&s.status.failed, 1)
+				s.status.mu.Lock()
+				s.status.failed++
+				s.status.mu.Unlock()
 				s.addEvent(SyncEvent{Type: "error", RelPath: f.RelPath, Message: err.Error()})
 			}
 		}
@@ -245,7 +247,7 @@ func (s *Syncer) Sync(ctx context.Context, paths []string) error {
 func (s *Syncer) expandPaths(ctx context.Context, paths []string) ([]FileInfo, error) {
 	// 大量文件（>20）时直接取整棵树，避免逐个请求
 	if len(paths) > 20 {
-		return s.expandAll(ctx)
+		return s.remote.Tree("", 0)
 	}
 	var out []FileInfo
 	for _, p := range paths {
@@ -281,19 +283,7 @@ func (s *Syncer) expandPaths(ctx context.Context, paths []string) ([]FileInfo, e
 	return out, nil
 }
 
-// expandAll 直接拉取远程整棵树（包含目录条目）
-func (s *Syncer) expandAll(ctx context.Context) ([]FileInfo, error) {
-	return s.remote.Tree("", 0)
-}
-
 func (s *Syncer) isRemoteDir(ctx context.Context, rel string) (bool, error) {
-	// 用 info 拉取
-	q := struct {
-		Path string `json:"rel_path"`
-		IsDir bool `json:"is_dir"`
-	}{}
-	_ = q
-	// 直接调用 list 上级目录
 	parent := parentDir(rel)
 	name := filepath.Base(rel)
 	items, err := s.remote.ListDir(parent)
@@ -334,7 +324,9 @@ func (s *Syncer) syncOne(ctx context.Context, fi FileInfo) error {
 		if err := os.MkdirAll(local, 0755); err != nil {
 			return err
 		}
-		atomic.AddInt64(&s.status.completed, 1)
+		s.status.mu.Lock()
+		s.status.completed++
+		s.status.mu.Unlock()
 		s.addEvent(SyncEvent{Type: "skip", RelPath: fi.RelPath, Message: "创建目录"})
 		return nil
 	}
@@ -345,8 +337,10 @@ func (s *Syncer) syncOne(ctx context.Context, fi FileInfo) error {
 		if info.Size() == fi.Size && info.ModTime().Unix() == fi.MTime {
 			// 磁盘和远端一致，跳过；同时把 meta 校准
 			s.meta.Set(fi.RelPath, FileMeta{Size: fi.Size, MTime: fi.MTime})
-			atomic.AddInt64(&s.status.skipped, 1)
-			atomic.AddInt64(&s.status.completed, 1)
+			s.status.mu.Lock()
+			s.status.skipped++
+			s.status.completed++
+			s.status.mu.Unlock()
 			s.addEvent(SyncEvent{Type: "skip", RelPath: fi.RelPath, Message: "大小+mtime一致"})
 			return nil
 		}
@@ -357,10 +351,13 @@ func (s *Syncer) syncOne(ctx context.Context, fi FileInfo) error {
 		return err
 	}
 
-	// 3. 下载
+	// 3. 下载（带 ctx 控制）
+	throttle := newProgressThrottle(100 * time.Millisecond)
 	s.addEvent(SyncEvent{Type: "download", RelPath: fi.RelPath, Total: fi.Size})
-	err := s.remote.DownloadToFile(fi.RelPath, local, fi.Size, func(d int64) {
-		s.addEvent(SyncEvent{Type: "progress", RelPath: fi.RelPath, Total: fi.Size, Current: d})
+	err := s.remote.DownloadToFile(ctx, fi.RelPath, local, fi.Size, func(d int64) {
+		if throttle.allow() {
+			s.addEvent(SyncEvent{Type: "progress", RelPath: fi.RelPath, Total: fi.Size, Current: d})
+		}
 	})
 	if err != nil {
 		// 失败删除半成品
@@ -381,19 +378,43 @@ func (s *Syncer) syncOne(ctx context.Context, fi FileInfo) error {
 	// 5. 先同步写入基本元信息（size+mtime），保证下次比对能命中跳过
 	s.meta.Set(fi.RelPath, FileMeta{Size: fi.Size, MTime: fi.MTime})
 
-	// 6. 异步算 SHA256 并 update meta
+	// 6. 异步算 SHA256 并 update meta，遵循 ctx 取消
 	s.hashWG.Add(1)
 	go func(rel string, p string, size, mtime int64) {
 		defer s.hashWG.Done()
+		if ctx.Err() != nil {
+			return
+		}
 		h, err := hashLocalFile(p)
 		if err == nil {
 			s.meta.Set(rel, FileMeta{Size: size, MTime: mtime, SHA256: h})
 		}
 	}(fi.RelPath, local, fi.Size, fi.MTime)
 
-	atomic.AddInt64(&s.status.completed, 1)
+	s.status.mu.Lock()
+	s.status.completed++
+	s.status.mu.Unlock()
 	s.addEvent(SyncEvent{Type: "verify", RelPath: fi.RelPath, Message: "完成"})
 	return nil
+}
+
+// progressThrottle 限制回调频率（最后一次调用必触发，避免收尾丢数据）
+type progressThrottle struct {
+	minInterval time.Duration
+	last        time.Time
+}
+
+func newProgressThrottle(d time.Duration) *progressThrottle {
+	return &progressThrottle{minInterval: d}
+}
+
+func (p *progressThrottle) allow() bool {
+	now := time.Now()
+	if now.Sub(p.last) >= p.minInterval {
+		p.last = now
+		return true
+	}
+	return false
 }
 
 func hashLocalFile(p string) (string, error) {

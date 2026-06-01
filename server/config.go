@@ -2,7 +2,9 @@ package main
 
 import (
 	"os"
+	"path"
 	"regexp"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -69,7 +71,7 @@ func NewFilter(cfg FilterConfig) (*Filter, error) {
 }
 
 // Allow 判断文件是否允许同步
-// relPath 是相对 root 的路径
+// relPath 是相对 root 的路径（正斜杠分隔）
 func (f *Filter) Allow(relPath string, size int64) bool {
 	if f == nil {
 		return true
@@ -77,7 +79,7 @@ func (f *Filter) Allow(relPath string, size int64) bool {
 	if f.cfg.MaxSize > 0 && size > f.cfg.MaxSize {
 		return false
 	}
-	ext := getExt(relPath)
+	ext := strings.ToLower(path.Ext(relPath))
 	if _, ok := f.excludeExt[ext]; ok {
 		return false
 	}
@@ -87,23 +89,4 @@ func (f *Filter) Allow(relPath string, size int64) bool {
 		}
 	}
 	return true
-}
-
-func getExt(p string) string {
-	for i := len(p) - 1; i >= 0 && p[i] != '/'; i-- {
-		if p[i] == '.' {
-			return lower(p[i:])
-		}
-	}
-	return ""
-}
-
-func lower(s string) string {
-	b := []byte(s)
-	for i, c := range b {
-		if c >= 'A' && c <= 'Z' {
-			b[i] = c + 32
-		}
-	}
-	return string(b)
 }

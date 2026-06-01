@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"embed"
 	"encoding/json"
 	"io/fs"
@@ -118,8 +117,25 @@ func (s *LocalServer) handleSync(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 400, map[string]any{"error": "paths is required"})
 		return
 	}
-	ctx := context.Background()
-	if err := s.syncer.Sync(ctx, req.Paths); err != nil {
+	// 清理 + 去重（保序）
+	seen := make(map[string]struct{}, len(req.Paths))
+	paths := make([]string, 0, len(req.Paths))
+	for _, p := range req.Paths {
+		p = sanitizePath(p)
+		if p == "" {
+			continue
+		}
+		if _, ok := seen[p]; ok {
+			continue
+		}
+		seen[p] = struct{}{}
+		paths = append(paths, p)
+	}
+	if len(paths) == 0 {
+		writeJSON(w, 400, map[string]any{"error": "paths is required"})
+		return
+	}
+	if err := s.syncer.Sync(r.Context(), paths); err != nil {
 		writeJSON(w, 409, map[string]any{"error": err.Error()})
 		return
 	}

@@ -21,7 +21,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("加载配置失败: %v", err)
 	}
-	absRoot, err := absPath(cfg.Root)
+	absRoot, err := filepath.Abs(cfg.Root)
 	if err != nil {
 		log.Fatalf("解析 root 路径失败: %v", err)
 	}
@@ -37,6 +37,9 @@ func main() {
 		Addr:              cfg.Listen,
 		Handler:           srv.Handler(),
 		ReadHeaderTimeout: 30 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      0, // 大文件下载不设上限
+		IdleTimeout:       120 * time.Second,
 	}
 
 	log.Printf("文件同步服务端启动")
@@ -61,13 +64,6 @@ func main() {
 	}
 	<-idleConnClosed
 	log.Printf("已退出")
-}
-
-func absPath(p string) (string, error) {
-	if p == "" {
-		p = "."
-	}
-	return absResolve(p)
 }
 
 func resolveServerConfig(name string) string {

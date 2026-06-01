@@ -1,6 +1,8 @@
 package main
 
 import (
+	"compress/gzip"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -146,10 +148,14 @@ func (c *RemoteClient) HashInfo(rel string) (*FileInfo, error) {
 // - start >= 0 时使用 Range 请求
 // - end == 0 表示下载到文件结尾；end > 0 表示具体结束位置
 // - 接收 gzip 压缩（无 Range 时才压缩）
-func (c *RemoteClient) DownloadRange(rel string, start, end int64) (io.ReadCloser, int64, string, error) {
+// - ctx 用于中途取消（会取消 HTTP 请求）
+func (c *RemoteClient) DownloadRange(ctx context.Context, rel string, start, end int64) (io.ReadCloser, int64, string, error) {
 	q := url.Values{}
 	q.Set("path", rel)
 	req, _ := http.NewRequest("GET", c.buildURL("/api/download", q), nil)
+	if ctx != nil {
+		req = req.WithContext(ctx)
+	}
 	if start >= 0 {
 		// 总是发送 Range 头：end==0 意味着到结尾，服务端按 bytes=start- 解析
 		if end > 0 {
@@ -164,7 +170,7 @@ func (c *RemoteClient) DownloadRange(rel string, start, end int64) (io.ReadClose
 		return nil, 0, "", err
 	}
 	if resp.StatusCode != 200 && resp.StatusCode != 206 {
-		resp.Body.Close()
+		_ = resp.Body.Close()
 		return nil, 0, "", fmt.Errorf("download: status %d", resp.StatusCode)
 	}
 	cl, _ := strconv.ParseInt(resp.Header.Get("Content-Length"), 10, 64)
@@ -172,12 +178,27 @@ func (c *RemoteClient) DownloadRange(rel string, start, end int64) (io.ReadClose
 }
 
 // DownloadWhole 整体下载（小文件）
-func (c *RemoteClient) DownloadWhole(rel string) (io.ReadCloser, int64, string, error) {
-	return c.DownloadRange(rel, -1, 0)
+func (c *RemoteClient) DownloadWhole(ctx context.Context, rel string) (io.ReadCloser, int64, string, error) {
+	return c.DownloadRange(ctx, rel, -1, 0)
+}
+
+// progressReader 包装 io.Reader，每次读取后回调已读字节数
+type progressReader struct {
+	r        io.Reader
+	total    int64
+	callback func(int64)
+}
+
+func (pr *progressReader) Read(p []byte) (int, error) {
+	n, err := pr.r.Read(p)
+	pr.total += int64(n)
+	pr.callback(pr.total)
+	return n, err
 }
 
 // DownloadToFile 完整下载到文件
-func (c *RemoteClient) DownloadToFile(rel, dst string, expectedSize int64, progress func(downloaded int64)) error {
+// ctx 用于支持中途取消
+func (c *RemoteClient) DownloadToFile(ctx context.Context, rel, dst string, expectedSize int64, progress func(downloaded int64)) error {
 	// 先检查本地是否需要断点续传
 	var start int64 = 0
 	if info, err := os.Stat(dst); err == nil {
@@ -189,7 +210,7 @@ func (c *RemoteClient) DownloadToFile(rel, dst string, expectedSize int64, progr
 		}
 	}
 
-	reader, contentLen, encoding, err := c.DownloadRange(rel, start, 0)
+	reader, _, encoding, err := c.DownloadRange(ctx, rel, start, 0)
 	if err != nil {
 		return err
 	}
@@ -198,7 +219,7 @@ func (c *RemoteClient) DownloadToFile(rel, dst string, expectedSize int64, progr
 	// 如果是 gzip，包装 reader
 	var src io.Reader = reader
 	if encoding == "gzip" {
-		gz, err := newGzipReader(reader)
+		gz, err := gzip.NewReader(reader)
 		if err != nil {
 			return err
 		}
@@ -219,41 +240,15 @@ func (c *RemoteClient) DownloadToFile(rel, dst string, expectedSize int64, progr
 	}
 	defer f.Close()
 
-	// 计算预期总大小（如果服务端使用 gzip，这里无法直接得到）
-	// 对于断点续传 + gzip 场景需要服务端支持 head 探测，为简单起见
-	// 我们在 expectedSize>0 时使用 expectedSize - start 作为剩余字节数
-	remaining := int64(-1)
-	if encoding == "" && contentLen > 0 {
-		remaining = contentLen
-	} else if expectedSize > 0 {
-		remaining = expectedSize - start
-	}
-
+	// 使用带进度回调的 reader 包装，再通过 io.CopyBuffer 拷贝
 	buf := make([]byte, 32*1024)
-	var downloaded int64 = 0
-	for {
-		n, rerr := src.Read(buf)
-		if n > 0 {
-			if _, werr := f.Write(buf[:n]); werr != nil {
-				return werr
-			}
-			downloaded += int64(n)
-			if progress != nil {
-				if remaining > 0 {
-					progress(downloaded)
-				} else {
-					progress(downloaded)
-				}
-			}
+	pr := &progressReader{r: src, callback: func(n int64) {
+		if progress != nil {
+			progress(n)
 		}
-		if rerr == io.EOF {
-			break
-		}
-		if rerr != nil {
-			return rerr
-		}
-	}
-	return nil
+	}}
+	_, err = io.CopyBuffer(f, pr, buf)
+	return err
 }
 
 // sanitizePath 清理路径中的非法字符

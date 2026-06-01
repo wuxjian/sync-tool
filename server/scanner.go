@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 )
 
 // FileInfo 单个文件信息
@@ -46,14 +47,10 @@ func safeJoin(root, rel string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if absFull != absRoot && !hasPrefix(absFull, absRoot+string(filepath.Separator)) {
+	if absFull != absRoot && !strings.HasPrefix(absFull, absRoot+string(filepath.Separator)) {
 		return "", os.ErrPermission
 	}
 	return absFull, nil
-}
-
-func hasPrefix(s, prefix string) bool {
-	return len(s) >= len(prefix) && s[:len(prefix)] == prefix
 }
 
 // ListDir 列出目录内容
@@ -140,7 +137,7 @@ func WalkTree(root, rel string, f *Filter, maxDepth, curDepth int) ([]FileInfo, 
 	if err != nil {
 		return nil, err
 	}
-	var out []FileInfo
+	out := make([]FileInfo, 0, len(entries))
 	for _, e := range entries {
 		if len(e.Name()) > 0 && e.Name()[0] == '.' {
 			continue

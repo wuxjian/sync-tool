@@ -2,8 +2,6 @@ package main
 
 import (
 	"compress/gzip"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -286,15 +284,3 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 func writeError(w http.ResponseWriter, status int, msg string) {
 	writeJSON(w, status, map[string]any{"error": msg})
 }
-
-// quickHash 内部使用的小工具：返回 sha256 头 8 字节 hex，便于日志
-func quickHash(p string) string {
-	h, _ := HashFile(p)
-	if len(h) >= 16 {
-		return h[:16]
-	}
-	return h
-}
-
-var _ = sha256.New
-var _ = hex.EncodeToString
