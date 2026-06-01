@@ -42,6 +42,7 @@ func (s *LocalServer) routes() {
 	s.mux.HandleFunc("/api/diff", s.handleDiff)
 	s.mux.HandleFunc("/api/local/tree", s.handleLocalTree)
 	s.mux.HandleFunc("/api/sync", s.handleSync)
+	s.mux.HandleFunc("/api/sync/cancel", s.handleSyncCancel)
 	s.mux.HandleFunc("/api/status", s.handleStatus)
 	s.mux.HandleFunc("/api/config", s.handleConfig)
 }
@@ -144,6 +145,20 @@ func (s *LocalServer) handleSync(w http.ResponseWriter, r *http.Request) {
 
 func (s *LocalServer) handleStatus(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, s.syncer.GetStatus())
+}
+
+// handleSyncCancel 取消当前同步任务（幂等）
+func (s *LocalServer) handleSyncCancel(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, 405, map[string]any{"error": "method not allowed"})
+		return
+	}
+	if !s.syncer.IsRunning() {
+		writeJSON(w, 200, map[string]any{"ok": true, "message": "当前没有正在运行的同步任务"})
+		return
+	}
+	s.syncer.Cancel()
+	writeJSON(w, 200, map[string]any{"ok": true, "message": "已请求取消"})
 }
 
 func (s *LocalServer) handleConfig(w http.ResponseWriter, r *http.Request) {

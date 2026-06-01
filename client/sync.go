@@ -61,6 +61,9 @@ type Syncer struct {
 	meta    *MetaStore
 	status  *SyncStatus
 	hashWG  sync.WaitGroup
+
+	cancelMu sync.Mutex
+	cancel   context.CancelFunc // 当前运行任务的 cancel；运行时非空
 }
 
 func NewSyncer(cfg *Config, remote *RemoteClient, meta *MetaStore) *Syncer {
@@ -187,10 +190,16 @@ func (s *Syncer) IsRunning() bool {
 
 // Sync 启动一次同步
 // paths 是要同步的相对路径列表（可能是目录或文件）
+// ctx 作为父上下文（其取消会传导至本次任务），并可通过 Cancel() 主动取消
 func (s *Syncer) Sync(ctx context.Context, paths []string) error {
 	if s.IsRunning() {
 		return errors.New("已有同步任务在运行中")
 	}
+	runCtx, cancel := context.WithCancel(ctx)
+	s.cancelMu.Lock()
+	s.cancel = cancel
+	s.cancelMu.Unlock()
+
 	s.status.mu.Lock()
 	s.status.running = true
 	s.status.total = 0
@@ -202,18 +211,32 @@ func (s *Syncer) Sync(ctx context.Context, paths []string) error {
 	s.status.mu.Unlock()
 
 	go func() {
+		cancelled := false
 		defer func() {
+			s.cancelMu.Lock()
+			s.cancel = nil
+			s.cancelMu.Unlock()
+			cancel() // 释放 ctx
 			s.status.mu.Lock()
 			s.status.running = false
 			s.status.mu.Unlock()
 			s.hashWG.Wait()
 			_ = s.meta.Save()
+			if cancelled {
+				s.addEvent(SyncEvent{Type: "cancelled", Message: "同步已取消"})
+			} else {
+				s.addEvent(SyncEvent{Type: "done", Message: "同步结束"})
+			}
 		}()
 
 		// 1. 展开路径为文件列表
-		files, err := s.expandPaths(ctx, paths)
+		files, err := s.expandPaths(runCtx, paths)
 		if err != nil {
-			s.addEvent(SyncEvent{Type: "error", Message: "展开路径失败: " + err.Error()})
+			if runCtx.Err() != nil {
+				cancelled = true
+			} else {
+				s.addEvent(SyncEvent{Type: "error", Message: "展开路径失败: " + err.Error()})
+			}
 			return
 		}
 		s.status.mu.Lock()
@@ -224,23 +247,33 @@ func (s *Syncer) Sync(ctx context.Context, paths []string) error {
 
 		// 2. 逐个比对并下载
 		for _, f := range files {
-			select {
-			case <-ctx.Done():
-				s.addEvent(SyncEvent{Type: "error", Message: "任务被取消"})
+			if runCtx.Err() != nil {
+				cancelled = true
 				return
-			default:
 			}
-			if err := s.syncOne(ctx, f); err != nil {
+			if err := s.syncOne(runCtx, f); err != nil {
+				if runCtx.Err() != nil {
+					cancelled = true
+					return
+				}
 				s.status.mu.Lock()
 				s.status.failed++
 				s.status.mu.Unlock()
 				s.addEvent(SyncEvent{Type: "error", RelPath: f.RelPath, Message: err.Error()})
 			}
 		}
-
-		s.addEvent(SyncEvent{Type: "done", Message: "同步结束"})
 	}()
 	return nil
+}
+
+// Cancel 请求取消当前正在运行的同步任务（幂等：未运行时不报错）
+func (s *Syncer) Cancel() {
+	s.cancelMu.Lock()
+	c := s.cancel
+	s.cancelMu.Unlock()
+	if c != nil {
+		c()
+	}
 }
 
 // expandPaths 将用户选择的路径展开为具体文件列表

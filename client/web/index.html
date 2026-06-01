@@ -32,6 +32,9 @@
     button.primary { background: #2da44e; color: #fff; border-color: #2c974b; }
     button.primary:hover { background: #2c974b; }
     button.primary:disabled { background: #94d3a2; border-color: #94d3a2; cursor: not-allowed; }
+    button.danger { background: #cf222e; color: #fff; border-color: #a40e26; }
+    button.danger:hover { background: #a40e26; }
+    button.danger:disabled { background: #e8a4a8; border-color: #e8a4a8; cursor: not-allowed; }
     .info { color: #57606a; font-size: 13px; }
     .layout { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
     @media (max-width: 900px) { .layout { grid-template-columns: 1fr; } }
@@ -70,6 +73,8 @@
     .type-verify { color: #2da44e; }
     .type-error { color: #cf222e; }
     .type-done { color: #1a7f37; font-weight: 700; }
+    .type-cancelled { color: #9a6700; font-weight: 700; }
+    .type-start { color: #0969da; font-weight: 600; }
     .badge {
       display: inline-block; padding: 1px 7px; border-radius: 10px;
       font-size: 11px; font-weight: 600; line-height: 1.5;
@@ -119,6 +124,7 @@
       <button onclick="selectNone()">全不选</button>
       <button onclick="selectInvert()">反选</button>
       <button class="primary" id="syncBtn" onclick="startSync()">▶ 开始同步</button>
+      <button class="danger" id="cancelBtn" onclick="cancelSync()" style="display:none;">⏹ 取消同步</button>
       <span class="info" id="statusInfo"></span>
     </div>
 
@@ -488,10 +494,8 @@
       }
       // 大量文件时直接同步整个目录树
       const payload = paths.length > 50 ? [''] : paths;
-      const btn = document.getElementById('syncBtn');
-      btn.disabled = true;
-      btn.textContent = '同步中...';
       document.getElementById('events').innerHTML = '';
+      setSyncUI('starting');
       try {
         const r = await fetch('/api/sync', {
           method: 'POST',
@@ -500,11 +504,49 @@
         });
         const data = await r.json();
         if (!r.ok) throw new Error(data.error || '启动失败');
+        setSyncUI('running');
         startPolling();
       } catch (e) {
         alert('启动失败: ' + e.message);
-        btn.disabled = false;
-        btn.textContent = '▶ 开始同步';
+        setSyncUI('idle');
+      }
+    }
+
+    async function cancelSync() {
+      const cancelBtn = document.getElementById('cancelBtn');
+      cancelBtn.disabled = true;
+      cancelBtn.textContent = '取消中...';
+      try {
+        const r = await fetch('/api/sync/cancel', {method: 'POST'});
+        if (!r.ok) {
+          const data = await r.json().catch(() => ({}));
+          throw new Error(data.error || ('HTTP ' + r.status));
+        }
+        // 等待后端把状态翻转；轮询会自然把 UI 复位
+        if (!statusTimer) startPolling();
+      } catch (e) {
+        alert('取消失败: ' + e.message);
+        cancelBtn.disabled = false;
+        cancelBtn.textContent = '⏹ 取消同步';
+      }
+    }
+
+    // 同步相关 UI 状态机
+    function setSyncUI(state) {
+      const syncBtn = document.getElementById('syncBtn');
+      const cancelBtn = document.getElementById('cancelBtn');
+      if (state === 'running' || state === 'starting') {
+        syncBtn.disabled = true;
+        syncBtn.textContent = '同步中...';
+        cancelBtn.style.display = '';
+        cancelBtn.disabled = false;
+        cancelBtn.textContent = '⏹ 取消同步';
+      } else {
+        syncBtn.disabled = false;
+        syncBtn.textContent = '▶ 开始同步';
+        cancelBtn.style.display = 'none';
+        cancelBtn.disabled = false;
+        cancelBtn.textContent = '⏹ 取消同步';
       }
     }
 
@@ -521,8 +563,7 @@
         if (!s.running) {
           clearInterval(statusTimer);
           statusTimer = null;
-          document.getElementById('syncBtn').disabled = false;
-          document.getElementById('syncBtn').textContent = '▶ 开始同步';
+          setSyncUI('idle');
           // 同步结束后自动刷新两边树
           loadAll();
         }
@@ -531,9 +572,14 @@
 
     function renderStatus(s) {
       const badge = document.getElementById('statusBadge');
+      const list = s.events || [];
+      const last = list.length ? list[list.length - 1] : null;
       if (s.running) {
         badge.className = 'badge running';
         badge.textContent = '运行中';
+      } else if (last && last.type === 'cancelled') {
+        badge.className = 'badge error';
+        badge.textContent = '已取消';
       } else if (s.failed > 0) {
         badge.className = 'badge error';
         badge.textContent = '部分失败';
