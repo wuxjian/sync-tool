@@ -46,13 +46,19 @@ sync-tool/
 ### 1. 编译
 
 ```bash
-# 服务端（在 Linux 上交叉编译或在 Linux 上直接编译）
+# 服务端（在 Linux 上编译）
 cd server
-go build -o server .
+go build -o synctool-server .
 
-# 客户端（在 Windows 上编译，或从 Linux 交叉编译）
+# 客户端（从 Linux 交叉编译到 Windows）
 cd ../client
-GOOS=windows GOARCH=amd64 go build -o client.exe .
+GOOS=windows GOARCH=amd64 go build -o synctool-client.exe .
+
+# 在 Windows 上直接编译
+cd client
+go build -o synctool-client.exe .
+cd server
+go build -o synctool-server.exe .
 ```
 
 ### 2. 在 Linux 上启动服务端
@@ -60,7 +66,7 @@ GOOS=windows GOARCH=amd64 go build -o client.exe .
 ```bash
 cp ../config/server.yaml.example config.yaml
 # 修改 config.yaml：设置 root 为要同步的目录
-./server -config=config.yaml
+./synctool-server -config=config.yaml
 ```
 
 输出类似：
@@ -74,9 +80,9 @@ cp ../config/server.yaml.example config.yaml
 ### 3. 在 Windows 上启动客户端
 
 ```bat
-:: 把 client.exe 复制到 Windows
+:: 把 synctool-client.exe 复制到 Windows
 :: 把 client.yaml.example 改名为 client.yaml，修改 remote.url 指向 Linux 服务端
-client.exe -config=config.yaml
+synctool-client.exe -config=config.yaml
 ```
 
 输出类似：
