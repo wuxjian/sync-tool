@@ -243,48 +243,47 @@ func (s *Syncer) Sync(ctx context.Context, paths []string) error {
 
 // expandPaths 将用户选择的路径展开为具体文件列表
 func (s *Syncer) expandPaths(ctx context.Context, paths []string) ([]FileInfo, error) {
+	// 大量文件（>20）时直接取整棵树，避免逐个请求
+	if len(paths) > 20 {
+		return s.expandAll(ctx)
+	}
 	var out []FileInfo
 	for _, p := range paths {
 		rel := sanitizePath(p)
-		// 空路径代表根目录
 		if rel == "" {
 			items, err := s.remote.Tree("", 0)
 			if err != nil {
 				return nil, err
 			}
-			for _, it := range items {
-				if !it.IsDir {
-					out = append(out, it)
-				}
-			}
+			out = append(out, items...)
 			continue
 		}
 		isDir, err := s.isRemoteDir(ctx, rel)
 		if err != nil {
-			// 拿不到就当文件处理
 			isDir = false
 		}
 		if isDir {
-			items, err := s.remote.Tree(rel, 0) // 0 = 无限深度
+			items, err := s.remote.Tree(rel, 0)
 			if err != nil {
 				return nil, err
 			}
-			for _, it := range items {
-				if !it.IsDir {
-					out = append(out, it)
-				}
-			}
+			out = append(out, items...)
 		} else {
 			fi, err := s.remote.HashInfo(rel)
 			if err != nil {
-				return nil, err
+				s.addEvent(SyncEvent{Type: "error", RelPath: rel, Message: "获取文件信息失败: " + err.Error()})
+				continue
 			}
 			out = append(out, *fi)
 		}
 	}
-	// 排序
 	sort.Slice(out, func(i, j int) bool { return out[i].RelPath < out[j].RelPath })
 	return out, nil
+}
+
+// expandAll 直接拉取远程整棵树（包含目录条目）
+func (s *Syncer) expandAll(ctx context.Context) ([]FileInfo, error) {
+	return s.remote.Tree("", 0)
 }
 
 func (s *Syncer) isRemoteDir(ctx context.Context, rel string) (bool, error) {
@@ -329,6 +328,16 @@ func lastSlash(p string) int {
 // syncOne 同步单个文件
 func (s *Syncer) syncOne(ctx context.Context, fi FileInfo) error {
 	local := filepath.Join(s.cfg.Local.Root, filepath.FromSlash(fi.RelPath))
+
+	// 0. 目录条目：创建本地目录
+	if fi.IsDir {
+		if err := os.MkdirAll(local, 0755); err != nil {
+			return err
+		}
+		atomic.AddInt64(&s.status.completed, 1)
+		s.addEvent(SyncEvent{Type: "skip", RelPath: fi.RelPath, Message: "创建目录"})
+		return nil
+	}
 
 	// 1. 以磁盘文件实际状态为准判断是否需要下载
 	// 信任磁盘而不是 meta，因为用户可能手动改过本地文件

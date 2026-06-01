@@ -160,6 +160,7 @@
   <script>
     // ===== 远端树 =====
     let treeData = [];            // FileStatus[]
+    let fileInfoMap = new Map(); // rel_path -> FileInfo（快速查找）
     let allDirs = new Map();       // rel_path -> {expanded, children: [rel_path]}
     let allFiles = new Set();      // rel_path
     let fileStatus = new Map();    // rel_path -> status string
@@ -169,6 +170,7 @@
     let localData = [];           // LocalFile[]
     let localDirs = new Map();     // rel_path -> {expanded, children}
     let localFiles = new Set();
+    let localInfoMap = new Map();  // rel_path -> LocalFile（快速查找）
     let localSelected = new Set(); // 暂未使用（本地树只读）
 
     let statusTimer = null;
@@ -204,6 +206,7 @@
       try {
         const data = await fetchJSON('/api/diff?path=&depth=0');
         treeData = data.items;
+        fileInfoMap = new Map(treeData.map(n => [n.rel_path, n]));
         allDirs.clear();
         allFiles.clear();
         fileStatus.clear();
@@ -237,6 +240,21 @@
           // 父目录缺失，挂到根
           allDirs.get('').children.push(n.rel_path);
         }
+      }
+    }
+
+    function buildLocalChildren() {
+      for (const d of localDirs.keys()) {
+        localDirs.get(d).children = [];
+      }
+      for (const f of localData) {
+        const p = parentOf(f.rel_path);
+        (localDirs.has(p) ? localDirs.get(p) : localDirs.get('')).children.push(f.rel_path);
+      }
+      for (const dir of localDirs.keys()) {
+        if (dir === '') continue;
+        const p = parentOf(dir);
+        (localDirs.has(p) ? localDirs.get(p) : localDirs.get('')).children.push(dir);
       }
     }
 
@@ -279,13 +297,13 @@
         }
         const fname = fp.split('/').pop();
         const st = fileStatus.get(fp) || 'same';
-        const fi = treeData.find(x => x.rel_path === fp);
+        const fi = fileInfoMap.get(fp);
         const fc = selected.has(fp) ? 'checked' : '';
         const badge = statusBadge(st);
         html.push(`<div class="tree-row" style="padding-left:${(depth+1)*16 + 4}px">`);
         html.push(`<span class="toggle"></span>`);
         html.push(`<span class="icon">${st === 'same' ? '📄' : '📝'}</span>`);
-        html.push(`<input type="checkbox" ${fc} onclick="onFileCheck(this, '${escapeAttr(fp)}')">`);
+        html.push(`<input type="checkbox" ${fc} data-path="${escapeAttr(fp)}" onclick="onFileCheck(this, '${escapeAttr(fp)}')">`);
         html.push(`<span class="name">${escapeHTML(fname)}</span>`);
         if (fi) {
           html.push(`<span class="size">${fmtSize(fi.size)}</span>`);
@@ -313,6 +331,13 @@
       else selected.delete(fp);
     }
 
+    function syncCheckboxes() {
+      const tree = document.getElementById('tree');
+      for (const cb of tree.querySelectorAll('input[type=checkbox]')) {
+        cb.checked = selected.has(cb.dataset.path);
+      }
+    }
+
     function updateRemoteSummary() {
       let n = 0, m = 0, s = 0;
       for (const f of allFiles) {
@@ -336,18 +361,21 @@
       try {
         const data = await fetchJSON('/api/local/tree');
         localData = data.items;
+        localInfoMap = new Map(localData.map(f => [f.rel_path, f]));
         localDirs.clear();
         localFiles.clear();
         localDirs.set('', { expanded: true, children: [] });
+        // 参照远程树：为每个文件确保其所有祖先目录存在
         for (const f of localData) {
           localFiles.add(f.rel_path);
-          const p = parentOf(f.rel_path);
-          if (!localDirs.has(p)) localDirs.set(p, { expanded: false, children: [] });
+          let dir = parentOf(f.rel_path);
+          while (dir !== '' && !localDirs.has(dir)) {
+            localDirs.set(dir, { expanded: false, children: [] });
+            dir = parentOf(dir);
+          }
         }
-        for (const f of localData) {
-          const p = parentOf(f.rel_path);
-          localDirs.get(p).children.push(f.rel_path);
-        }
+        // 参照远程 buildChildren 模式构建目录树
+        buildLocalChildren();
         renderLocalTree();
         updateLocalSummary();
       } catch (e) {
@@ -380,8 +408,13 @@
 
       if (!meta.expanded) return;
 
+      // 子节点（目录递归渲染，文件渲染为状态行）
       for (const fp of meta.children) {
-        const f = localData.find(x => x.rel_path === fp);
+        if (localDirs.has(fp)) {
+          renderLocalNode(fp, html, depth + 1);
+          continue;
+        }
+        const f = localInfoMap.get(fp);
         if (!f) continue;
         const fname = fp.split('/').pop();
         const cls = f.exists ? 'local-file-row' : 'local-file-row missing';
@@ -424,22 +457,22 @@
         const st = fileStatus.get(f);
         if (st === 'new' || st === 'modified') selected.add(f);
       }
-      renderTree();
+      syncCheckboxes();
     }
     function selectAll() {
       for (const f of allFiles) selected.add(f);
-      renderTree();
+      syncCheckboxes();
     }
     function selectNone() {
       selected.clear();
-      renderTree();
+      syncCheckboxes();
     }
     function selectInvert() {
       for (const f of allFiles) {
         if (selected.has(f)) selected.delete(f);
         else selected.add(f);
       }
-      renderTree();
+      syncCheckboxes();
     }
 
     function loadAll() {
@@ -453,6 +486,8 @@
         alert('请先勾选要同步的文件');
         return;
       }
+      // 大量文件时直接同步整个目录树
+      const payload = paths.length > 50 ? [''] : paths;
       const btn = document.getElementById('syncBtn');
       btn.disabled = true;
       btn.textContent = '同步中...';
@@ -461,7 +496,7 @@
         const r = await fetch('/api/sync', {
           method: 'POST',
           headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({paths})
+          body: JSON.stringify({paths: payload})
         });
         const data = await r.json();
         if (!r.ok) throw new Error(data.error || '启动失败');

@@ -38,7 +38,7 @@ if not exist "%~dp0out\client.yaml" (
         copy "%~dp0config\client.yaml.example" "%~dp0out\client.yaml" >nul
     )
 ) else (
-    echo   - out\client.yaml 已存在，跳过复制
+    echo   - out\client.yaml exists, skip copy
 )
 if not exist "%~dp0out\server.yaml" (
     if exist "%~dp0server\config.yaml" (
@@ -47,7 +47,7 @@ if not exist "%~dp0out\server.yaml" (
         copy "%~dp0config\server.yaml.example" "%~dp0out\server.yaml" >nul
     )
 ) else (
-    echo   - out\server.yaml 已存在，跳过复制
+    echo   - out\server.yaml exists, skip copy
 )
 
 echo.
