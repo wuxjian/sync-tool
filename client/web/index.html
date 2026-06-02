@@ -180,6 +180,7 @@
     let localSelected = new Set(); // 暂未使用（本地树只读）
 
     let statusTimer = null;
+    let localTreeRefreshTimer = 0; // 本地树刷新限频（毫秒时间戳）
 
     async function fetchJSON(url) {
       const r = await fetch(url);
@@ -572,7 +573,14 @@
       try {
         const s = await fetchJSON('/api/status');
         renderStatus(s);
-        if (!s.running) {
+        if (s.running) {
+          // 同步中，每 3 秒刷新一次本地树，让用户能看到文件实时出现
+          const now = Date.now();
+          if (now - localTreeRefreshTimer > 3000) {
+            localTreeRefreshTimer = now;
+            loadLocalTree();
+          }
+        } else {
           clearInterval(statusTimer);
           statusTimer = null;
           setSyncUI('idle');
