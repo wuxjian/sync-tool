@@ -195,7 +195,7 @@ func (s *Syncer) Sync(ctx context.Context, paths []string) error {
 	if s.IsRunning() {
 		return errors.New("已有同步任务在运行中")
 	}
-	runCtx, cancel := context.WithCancel(ctx)
+	runCtx, cancel := context.WithCancel(context.Background())
 	s.cancelMu.Lock()
 	s.cancel = cancel
 	s.cancelMu.Unlock()

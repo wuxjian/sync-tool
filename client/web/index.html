@@ -596,7 +596,6 @@
 
       const ev = document.getElementById('events');
       const rendered = ev.childElementCount;
-      const list = s.events || [];
       if (list.length < rendered) ev.innerHTML = '';
       for (let i = rendered; i < list.length; i++) {
         const e = list[i];

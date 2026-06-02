@@ -118,14 +118,11 @@ func (s *LocalServer) handleSync(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 400, map[string]any{"error": "paths is required"})
 		return
 	}
-	// 清理 + 去重（保序）
+	// 清理 + 去重（保序）；空字符串保留（表示根目录）
 	seen := make(map[string]struct{}, len(req.Paths))
 	paths := make([]string, 0, len(req.Paths))
 	for _, p := range req.Paths {
 		p = sanitizePath(p)
-		if p == "" {
-			continue
-		}
 		if _, ok := seen[p]; ok {
 			continue
 		}
