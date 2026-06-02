@@ -556,6 +556,18 @@
       pollStatus();
     }
 
+    async function checkSyncStatus() {
+      try {
+        const s = await fetchJSON('/api/status');
+        if (s.running) {
+          // 刷新时后端仍有同步任务在运行，恢复 UI 为运行态
+          setSyncUI('running');
+          startPolling();
+        }
+        // 未运行时不处理，保持默认空闲态
+      } catch (e) { /* 网络错误不影响页面正常使用 */ }
+    }
+
     async function pollStatus() {
       try {
         const s = await fetchJSON('/api/status');
@@ -626,6 +638,7 @@
     // 启动
     loadConfig();
     loadAll();
+    checkSyncStatus();
   </script>
 </body>
 </html>
