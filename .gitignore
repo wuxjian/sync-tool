@@ -1,10 +1,10 @@
-*.exe
+client.exe
+client.exe
 *.log
 *.err
 *.out
 *.test
 *.meta
-*.yaml
 !*.yaml.example
 
 /go.sum
@@ -21,6 +21,3 @@ Thumbs.db
 # test data
 test/
 
-# build output
-out/
-out/sync-server
